@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Update dynamic statistics in parasite6.svg without touching the ASCII portrait."""
+import argparse
 import calendar
 from collections import Counter
 from datetime import datetime, date, timezone
@@ -49,6 +50,40 @@ def stats():
         raise RuntimeError(f'GitHub GraphQL failed: {data["errors"]}')
     return data['data']['user']
 
+def contributions_all_time(created_at, now=None):
+    """Sum public and anonymous private activity over disjoint calendar years."""
+    now = now or datetime.now(timezone.utc)
+    first_year = datetime.fromisoformat(created_at.replace('Z', '+00:00')).year
+    query = '''query($login: String!, $from: DateTime!, $to: DateTime!) {
+      user(login: $login) {
+        contributionsCollection(from: $from, to: $to) {
+          restrictedContributionsCount
+          contributionCalendar { totalContributions }
+          totalCommitContributions
+          totalPullRequestReviewContributions
+        }
+      }
+    }'''
+    total = dict(public=0, private=0, commits=0, reviews=0)
+    for year in range(first_year, now.year + 1):
+        start = datetime(year, 1, 1, tzinfo=timezone.utc)
+        end = min(datetime(year, 12, 31, 23, 59, 59, tzinfo=timezone.utc), now)
+        variables = {
+            'login': USER,
+            'from': start.isoformat().replace('+00:00', 'Z'),
+            'to': end.isoformat().replace('+00:00', 'Z'),
+        }
+        data = api('https://api.github.com/graphql', {'query': query, 'variables': variables})
+        if data.get('errors'):
+            raise RuntimeError(f'GitHub GraphQL failed for contributions in {year}: {data["errors"]}')
+        collection = data['data']['user']['contributionsCollection']
+        private = collection['restrictedContributionsCount']
+        total['private'] += private
+        total['public'] += collection['contributionCalendar']['totalContributions'] - private
+        total['commits'] += collection['totalCommitContributions']
+        total['reviews'] += collection['totalPullRequestReviewContributions']
+    return total
+
 def repositories():
     repos = []
     for page in range(1, 21):
@@ -94,9 +129,10 @@ def replace_spans(svg, label, fill, values):
     lines[i] = expression.sub(lambda m: m.group(1) + escape(str(next(iterator)), quote=False) + m.group(3), lines[i])
     return ''.join(lines)
 
-def main():
+def main(include_pending_commit=False):
     user = stats()
     repos = repositories()
+    lifetime = contributions_all_time(user['createdAt'])
     contributions = user['contributionsCollection']
     calendar_data = contributions['contributionCalendar']
     totals = [sum(day['contributionCount'] for day in w['contributionDays']) for w in calendar_data['weeks'][-52:]]
@@ -110,10 +146,13 @@ def main():
     content = replace_spans(content, 'Languages:', '#c9d1d9', [languages(repos)])
     content = replace_spans(content, 'Repos:', '#79c0ff', [len(repos), sum(r['stargazers_count'] for r in repos)])
     content = replace_spans(content, 'Forks:', '#79c0ff', [sum(r['forks_count'] for r in repos), user['followers']['totalCount']])
-    content = replace_spans(content, 'Commits:', '#79c0ff', [contributions['totalCommitContributions'], user['repositoriesContributedTo']['totalCount']])
+    # Derive from the API each time so unchanged reruns never accumulate commits.
+    # This display adjustment does not change GitHub contribution credit or authorship.
+    content = replace_spans(content, 'Commits:', '#79c0ff', [lifetime['commits'] + int(include_pending_commit), user['repositoriesContributedTo']['totalCount']])
     content = replace_spans(content, 'PRs:', '#79c0ff', [user['pullRequests']['totalCount'], user['issues']['totalCount']])
     content = replace_spans(content, 'Top repo:', '#c9d1d9', [f'{top["name"]} ({top["stargazers_count"]} ★)' if top else 'None'])
-    content = replace_spans(content, 'Contributions:', '#79c0ff', [calendar_data['totalContributions'], contributions['totalPullRequestReviewContributions']])
+    content = replace_spans(content, 'Public total:', '#79c0ff', [lifetime['public'], lifetime['reviews']])
+    content = replace_spans(content, 'Private total:', '#79c0ff', [lifetime['private']])
     content = replace_spans(content, 'fill="#39d353"', '#39d353', [' ' * 3 + sparkline])
 
     if content != SVG_PATH.read_text(encoding='utf-8'):
@@ -123,4 +162,8 @@ def main():
         print('No SVG stats changed')
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--include-pending-commit', action='store_true',
+                        help='Include the upcoming refresh commit in the displayed commit count.')
+    args = parser.parse_args()
+    main(include_pending_commit=args.include_pending_commit)

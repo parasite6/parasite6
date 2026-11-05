@@ -27,7 +27,7 @@ jobs:
       - name: Update live statistics
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python scripts/update_profile.py
+        run: python scripts/update_profile.py --include-pending-commit
       - name: Commit and push only when changed
         run: |
           if git diff --quiet -- parasite6.svg; then
