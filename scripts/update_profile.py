@@ -135,6 +135,8 @@ def main(include_pending_commit=False):
     lifetime = contributions_all_time(user['createdAt'])
     contributions = user['contributionsCollection']
     calendar_data = contributions['contributionCalendar']
+    # GitHub's daily calendar already includes shared anonymous private activity.
+    # Do not add restrictedContributionsCount again or distribute it across days.
     totals = [sum(day['contributionCount'] for day in w['contributionDays']) for w in calendar_data['weeks'][-52:]]
     highest = max(totals, default=0)
     blocks = '▁▂▃▄▅▆▇█'

@@ -39,7 +39,7 @@ class ProfileTests(unittest.TestCase):
                 'totalCommitContributions': 121,
                 'restrictedContributionsCount': 37,
                 'totalPullRequestReviewContributions': 0,
-                'contributionCalendar': {'totalContributions': 158, 'weeks': []},
+                'contributionCalendar': {'totalContributions': 158, 'weeks': [{'contributionDays': [{'contributionCount': 0}]}, {'contributionDays': [{'contributionCount': 37}]}]},
             },
         }
         with tempfile.TemporaryDirectory() as tmp:
@@ -51,6 +51,9 @@ class ProfileTests(unittest.TestCase):
                 self.assertIn('>201</tspan>', next(line for line in first.splitlines() if 'Commits:' in line))
                 self.assertIn('>57</tspan>', next(line for line in first.splitlines() if 'Private total:' in line))
                 self.assertIn('>300</tspan>', next(line for line in first.splitlines() if '. Public total:' in line))
+                self.assertIn('    █</tspan>', next(line for line in first.splitlines() if 'fill="#39d353"' in line))
+                self.assertNotIn('Public Contributions (all time)', first)
+                self.assertIn('Activity (public + private)', first)
                 profile.main(include_pending_commit=True)
                 self.assertEqual(first, target.read_text())
                 profile.main()
